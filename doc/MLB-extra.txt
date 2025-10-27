@@ -1,0 +1,18 @@
+These frames are produced by the Aliexpress adapter from MQB to MLB
+
+
+
+// Track previous
+16:40:13.135 -> 8E 9F 16 0 1 11 0 20 0 89 
+
+
+// Track next
+16:40:43.985 -> 8E 84 15 0 1 11 0 20 0 A5 
+
+
+// Star / joker
+16:41:12.100 -> 8E 9D 21 0 1 11 0 20 0 80 
+
+
+// Horn
+16:42:03.032 -> 8E 9E 0 0 0 11 0 20 1 A0 
