@@ -11,6 +11,7 @@
 #if CORRECT_SW_TEMP
 #define SW_TEMP_OFFSET -3                                                                                                           // Change by this amount - in degrees Celsius. Warning: this could damage the elements! J527 controls heating directly.
 #endif
+#define BACK_BUTTON_MEMORY 1                                                                                                        // Add memory for remapping the back button to revert the last action.
 
 HardwareSerial sw_lin(USART3);
 HardwareSerial car_lin(USART2);
@@ -23,7 +24,8 @@ unsigned long request_buttons_status_timer, request_heating_status_timer,
 
 uint8_t backlight_status_message[] = {0, 0x81, 0, 0, 0x71},                                                                         // Lights OFF
         buttons_status_message[] = {0x80, 0xF0, 0, 0, 0x21, 0, 0, 0, 0xDE},                                                         // First message upon connection
-        steering_heater_status_message[] = {0x32, 0xFE, 0x14};                                                                      // 0C, button released
+        steering_heater_status_message[] = {0x32, 0xFE, 0x14},                                                                      // 0C, button released
+        back_button_memory = 0;
 
 uint8_t button_remap_array[] = {                                                                                                    // Label    MQB original value
         0x0,
@@ -75,7 +77,7 @@ void setup() {
   car_lin.begin(19200);
   send_lin_wakeup();
 
-  delay(200);                                                                                                                      // Needed for MQB buttons to initialize
+  delay(200);                                                                                                                       // Needed for MQB buttons to initialize.
 
   request_buttons_status_timer
   =request_heating_status_timer
@@ -83,12 +85,15 @@ void setup() {
   =slave_comm_timer
   =master_comm_timer
   =millis();
+
+#if BACK_BUTTON_MEMORY
+  button_remap_array[8] = 8;                                                                                                        // Back can't be remapped via the array if this option is on.
+#endif
 }
 
 void loop() {
 
 // MASTER - requests button status, steering heater status and provides backlight status to the steering wheel.
-
   if (sw_lin.available()) {
     slave_comm_timer = millis();
     byte n = slave_frame.num_bytes();
@@ -160,7 +165,6 @@ void loop() {
 
 
 // SLAVE - reports button status, steering heater status and receive backlight data from car.
-
   if (car_lin.available()) {
     master_comm_timer = millis();
     byte b = car_lin.read();
@@ -176,7 +180,7 @@ void loop() {
 //     return;
 // #endif
 
-    if (b == 0x55 && n > 0) {                                                                                                       // Single byte ID only frames are sent by the master to request a response from slaves
+    if (b == 0x55 && n > 0) {                                                                                                       // Single byte ID only frames are sent by the master to request a response from slaves.
       master_frame.pop_byte();
       handle_master_frame();
       master_frame.reset();
@@ -213,6 +217,7 @@ void loop() {
     }
   }
 
+// Pseudo watchdog to reset LIN or the board.
   if ((millis() - slave_comm_timer) >= 2000) {
 #if DEBUG_MODE
     debug_serial.println("Timeout of slave RX. Resetting sw_lin.");
@@ -236,6 +241,7 @@ void loop() {
   }
 }
 
+
 void send_lin_wakeup(void) {
   // Send wakeup: Set TX low for 250..5000 µs
   sw_lin.end();
@@ -244,6 +250,7 @@ void send_lin_wakeup(void) {
   digitalWrite(SW_TX_PIN, 1);
   sw_lin.begin(19200);
 }
+
 
 void send_lin_break(void) {
   // Send break: Set TX low for 13+ bit times
@@ -255,6 +262,7 @@ void send_lin_break(void) {
   delayMicroseconds(52);                                                                                                            // 1 Bit time
   sw_lin.begin(19200);                                                                                                              // Restart UART
 }
+
 
 void handle_slave_frame(void) {
   if (slave_frame.get_byte(slave_frame.num_bytes() - 1) != check_frame_checksum(slave_frame)) {                                     // Validate checksum
@@ -288,6 +296,25 @@ void handle_slave_frame(void) {
       debug_serial.println("[ Horn ]");
     }
   #endif
+#endif
+
+#if BACK_BUTTON_MEMORY
+    if (buttons_status_message[1] != 8 && buttons_status_message[3] > 0) {                                                          // A button other than back was pressed
+      if (buttons_status_message[1] == 3) {
+        back_button_memory = 2;
+      } else if (buttons_status_message[1] == 2) {
+        back_button_memory = 3;
+      } else if (buttons_status_message[1] == 1) {
+        back_button_memory = 1;
+      }
+    } else if (buttons_status_message[1] == 8 && back_button_memory != 0) {
+#if DEBUG_BUTTON_PRESS
+      debug_serial.print("Sending back button action: ");
+      debug_serial.println(back_button_memory, HEX);
+#endif
+      buttons_status_message[1] = back_button_memory;
+      back_button_memory = 0;
+    }
 #endif
 
     buttons_status_message[2] = slave_frame.get_byte(3);                                                                            // May need adjustment with new buttons
@@ -410,6 +437,7 @@ void handle_slave_frame(void) {
 // #endif
 }
 
+
 void handle_master_frame(void) {
   if (master_frame.get_byte(master_frame.num_bytes()) != check_frame_checksum(master_frame)) {                                      // Validate checksum
     return;
@@ -436,6 +464,7 @@ void handle_master_frame(void) {
 // #endif
 }
 
+
 uint8_t calculate_lin2_checksum(uint8_t *data, uint8_t id, uint8_t size) {
   int checksum = id;
   for (uint8_t i = 0; i < size; i++) {
@@ -444,6 +473,7 @@ uint8_t calculate_lin2_checksum(uint8_t *data, uint8_t id, uint8_t size) {
   return 0xFF - (checksum % 0xFF);
 }
 
+
 int check_frame_checksum(LinFrame frame) {
   int checksum = frame.get_byte(0);
   for (uint8_t i = 1; i < frame.num_bytes() - 1; i++) {
@@ -451,6 +481,7 @@ int check_frame_checksum(LinFrame frame) {
   }
   return 0xFF - (checksum % 0xFF);
 }
+
 
 #if DEBUG_MODE
 void print_frame(LinFrame frame) {
