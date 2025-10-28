@@ -1,14 +1,14 @@
 // https://github.com/zapta/linbus/tree/master/analyzer/arduino
 #include "lin_frame.h"
 #define LED_PIN 18
-#define SWC_ID 0x0E                                     // set to 0xFF to ignore
+#define FRAME_ID_FILTER 0xFF                                     // set to 0xFF to ignore
 
 LinFrame frame;
 
 unsigned long request_buttons_timer, request_heating_status_timer,
               backlight_status_timer;
 uint8_t backlight_status[] = {0, 0x81, 0, 0, 0};
-uint8_t backlight_value = 0x64;
+uint8_t backlight_value = 0x20;
 
 void setup() {
   Serial.begin(38400);
@@ -47,7 +47,35 @@ void loop() {
     }
   }
 
-  if ((millis() - request_buttons_timer) >= 30) {
+  if ((millis() - request_heating_status_timer) >= 250) {
+    sendLinBreak();
+    Serial1.write((uint8_t)0x55);
+    // delayMicroseconds(10);
+    Serial1.write((uint8_t)0xBA);
+    // Serial1.flush();
+
+    request_heating_status_timer = millis();
+    request_buttons_timer = millis() - 10;
+    return;
+  }
+
+  if ((millis() - request_buttons_timer) >= 20) {
+
+    if ((millis() - backlight_status_timer) >= 100) {
+      sendLinBreak();
+      Serial1.write((uint8_t)0x55);
+      // delayMicroseconds(10);
+      Serial1.write((uint8_t)0xD);
+      // Serial1.flush();
+
+      backlight_status[0] = backlight_value;
+      backlight_status[4] = calculate_enh_checksum(backlight_status, 0xD, 4);
+      for (uint8_t i = 0; i < 5; i++) {
+        Serial1.write(backlight_status[i]);
+      }
+      backlight_status_timer = millis();
+      Serial1.flush();
+    }
     
     sendLinBreak();       // Send LIN break
     Serial1.write((uint8_t)0x55);   // Send sync byte (0x55)
@@ -57,34 +85,6 @@ void loop() {
 
     request_buttons_timer = millis();
   }
-
-  if ((millis() - request_heating_status_timer) >= 250) {
-    sendLinBreak();
-    Serial1.write((uint8_t)0x55);
-    // delayMicroseconds(10);
-    Serial1.write((uint8_t)0xBA);
-    // Serial1.flush();
-
-    request_heating_status_timer = millis();
-  }
-
-  if ((millis() - backlight_status_timer) >= 100) {
-    sendLinBreak();
-    Serial1.write((uint8_t)0x55);
-    // delayMicroseconds(10);
-    Serial1.write((uint8_t)0xD);
-    Serial1.flush();
-    // delayMicroseconds(10);
-
-    backlight_status[0] = backlight_value;
-    backlight_status[4] = calculate_enh_checksum(backlight_status, 0xD, 4);
-    for (uint8_t i = 0; i < 5; i++) {
-      Serial1.write(backlight_status[i]);
-      // Serial.print(backlight_status[i], HEX);
-      // Serial.print(" ");
-    }
-    backlight_status_timer = millis();
-  }
 }
 
 void sendLinBreak() {
@@ -93,15 +93,15 @@ void sendLinBreak() {
   
   Serial1.end();  // Release UART control of TX pin
   digitalWrite(0, LOW);  // Drive low for break
-  delayMicroseconds(700);
+  delayMicroseconds(780);
   digitalWrite(0, HIGH);  // Release
   Serial1.begin(19200);  // Restart UART
   // delayMicroseconds(10);
 }
 
 void handle_frame() {
-  if (SWC_ID != 0xFF) {
-    if ((frame.get_byte(0) & 0x3F) != SWC_ID)
+  if (FRAME_ID_FILTER != 0xFF) {
+    if ((frame.get_byte(0) & 0x3F) != FRAME_ID_FILTER)
       return;
   }
 
