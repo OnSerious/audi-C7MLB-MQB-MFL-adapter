@@ -62,7 +62,7 @@ private:
 
   // Recieved frame bytes. Includes id, data and checksum. Does not 
   // include the 0x55 sync byte.
-  uint8_t bytes_[kMaxBytes];
+  uint8_t bytes_[kMaxBytes + 1];                                                        // +1 in case of overflow
 };
 
 #endif  
