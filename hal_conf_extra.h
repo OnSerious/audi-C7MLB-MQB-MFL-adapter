@@ -1,5 +1,0 @@
-// Disable some unused modules
-
-#define HAL_I2C_MODULE_DISABLED
-#define HAL_RTC_MODULE_DISABLED
-#define HAL_SPI_MODULE_DISABLED
