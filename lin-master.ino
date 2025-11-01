@@ -10,7 +10,8 @@ void handle_master_request(uint8_t id) {
       // Serial.print(buttons_status_message[i], HEX);
       // Serial.print(" ");
     }
-    // car_lin.flush();
+    car_lin.end();                                                                                                                  // Waits for TX and clears RX. Crude loopback clear solution.
+    car_lin.begin(LINBUS_BAUD);
     // Serial.println();
   }
   else if (id == 0xBA) {                                                                                                            // Steering heater status request
@@ -22,18 +23,24 @@ void handle_master_request(uint8_t id) {
       // Serial.print(buttons_status_message[i], HEX);
       // Serial.print(" ");
     }
-    // car_lin.flush();
+    car_lin.end();
+    car_lin.begin(LINBUS_BAUD);
     // Serial.println();
   }
-  // else if (id == 0x7D) {                                                                                                            // Unknown request
-  //   for (uint8_t i = 0; i < 9; i++) {
-  //     car_lin.write(unk_message[i]);
-  //     // Serial.print(buttons_status_message[i], HEX);
-  //     // Serial.print(" ");
-  //   }
-  //   car_lin.flush();
-  //   // Serial.println();
-  // }
+  else if (id == 0x7D) {                                                                                                            // Diagnostic response request
+    if (diag_response_received) {
+      for (uint8_t i = 0; i < 9; i++) {
+        car_lin.write(diag_response_message[i]);
+        // Serial.print(diag_response_message[i], HEX);
+        // Serial.print(" ");
+      // }
+      car_lin.end();
+      car_lin.begin(LINBUS_BAUD);
+      // Serial.println();
+      }
+    }
+    diag_response_received = false;
+  }
 }
 
 
@@ -42,7 +49,12 @@ void handle_master_data_frame() {
 //   print_frame(master_frame);
 // #endif
   uint8_t id = master_frame.get_byte(0);
-  uint8_t expected_checksum = verify_frame_checksum(master_frame);
+  uint8_t expected_checksum = 0;
+  if (id == 0x3C) {
+    expected_checksum = verify_frame_checksum(master_frame, 0);                                                                     // Diagnostic IDs use the old checksum algo.
+  } else {
+    expected_checksum = verify_frame_checksum(master_frame, 1);
+  }
   if (master_frame.get_byte(master_frame.num_bytes() - 1) != expected_checksum) {                                                   // Validate checksum
 #if DEBUG_MODE
     Serial.print("master_frame checksum verification failed for ID: ");
@@ -99,8 +111,18 @@ void handle_master_data_frame() {
     fb_message_initialized = true;
 #endif
   }
-  // else if (id == 0x3C) {
-  // }
+  else if (id == 0x3C) {
+    diag_command_message[0] = master_frame.get_byte(1);
+    diag_command_message[1] = master_frame.get_byte(2);
+    diag_command_message[2] = master_frame.get_byte(3);
+    diag_command_message[3] = master_frame.get_byte(4);
+    diag_command_message[4] = master_frame.get_byte(5);
+    diag_command_message[5] = master_frame.get_byte(6);
+    diag_command_message[6] = master_frame.get_byte(7);
+    diag_command_message[7] = master_frame.get_byte(8);
+    diag_command_message[8] = master_frame.get_byte(9);
+    diag_response_requested = true;
+  }
 }
 
 

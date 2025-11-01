@@ -1,5 +1,8 @@
 // https://github.com/zapta/linbus/tree/master/analyzer/arduino
 #include "lin_frame.h"
+#if __has_include ("custom_settings.h")
+  #include "custom_settings.h"
+#endif
 
 #define SW_TX_PIN PB10
 #define DEBUG_MODE 1                                                                                                                // Enable USART1 debug interface. RX of TTL adapter needs to be connected to pin PA9 (TX).
@@ -23,9 +26,9 @@ const int8_t SW_TEMP_OFFSET = -10;                                              
 const uint16_t LINBUS_BAUD = 19200;
 const uint16_t LINBUS_BIT_TIME = 52;                                                                                                // At 19200 baud, 1 bit = 52.09 µs
 const uint16_t LINBUS_BREAK_DURATION = LINBUS_BIT_TIME * 15;                                                                        // Minimum 13 bits, ideally around 15.
-const uint16_t E_MESSAGE_INTERVAL = 30;                                                                                             // 30-33 ms
-const uint16_t BA_MESSAGE_INTERVAL = 95;                                                                                            // 95-97 ms
-const uint16_t D_MESSAGE_INTERVAL = 95;                                                                                             // 95-97 ms
+const uint16_t E_MESSAGE_INTERVAL = 30;                                                                                             // traces: 30-33 ms
+const uint16_t BA_MESSAGE_INTERVAL = 95;                                                                                            // traces: 95-97 ms
+const uint16_t D_MESSAGE_INTERVAL = 95;                                                                                             // traces: 95-97 ms
 const uint16_t FB_MESSAGE_INTERVAL = 65;
 const uint16_t SLAVE_COMM_TIMEOUT = 1000;
 const uint16_t SLAVE_BOOT_DELAY = 50;
@@ -44,11 +47,13 @@ unsigned long request_buttons_status_timer, request_heating_status_timer,
 uint8_t backlight_status_message[] = {0, 0x81, 0, 0, 0x71},                                                                         // Lights OFF
         buttons_status_message[] = {0x80, 0xF0, 0, 0, 0x21, 0, 0, 0, 0xDE},                                                         // First message upon connection
         steering_heater_status_message[] = {0x32, 0xFE, 0x14},                                                                      // 0C, button released
-        unk_message[] = {0x76, 0x77, 0x37, 0x1A, 0xB7, 0xB4, 0xD7, 0x42, 0x3A},
+        diag_response_message[] = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+        diag_command_message[] = {0, 0, 0, 0, 0, 0, 0, 0, 0},
         fb_message[] = {0, 0x90, 0xFF, 0x73},
         back_button_memory = 0, buttons_error_state = 0,
         steering_temperature = 0, backlight_value = 0;
 
+#ifndef CUSTOM_SETTINGS
 uint8_t button_remap_array[] = {                                                                                                    // Label      MQB original value
         0x0,
         1,                                                                                                                          // Menu       (1)
@@ -67,12 +72,12 @@ uint8_t button_remap_array[] = {                                                
         0x19,                                                                                                                       // Voice      (0x19)
         0x0,
         0x1B,                                                                                                                       // Nav        (0x1B)
-        0x19,                                                   // Mapped to Voice                                                  // Phone      (0x1C)           - MQB only.
+        0x1C,                                                                                                                       // Phone      (0x1C)           - MQB only.
         0x0, 0x0, 0x0,
         0x20,                                                                                                                       // Mute       (0x20)
         0x21,                                                                                                                       // Joker*     (0x21)
         0x0,
-        1,                                                      // Mapped to Menu                                                   // View       (0x23)           - MQB only
+        0x23,                                                                                                                       // View       (0x23)           - MQB only
         0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
         0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
         0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
@@ -82,11 +87,12 @@ uint8_t button_remap_array[] = {                                                
         0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
         0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
         0x0, 0x0, 0x0,
-        0x70,                                                                                                                       // Exhaust    (0x6F)           - R8
+        0x6F,                                                                                                                       // Exhaust    (0x6F)           - R8
         0x70,                                                                                                                       // drive select (0x70)         - R8/C7.5
-        0x70,                                                   // Mapped to drive select                                           // RS mode    (0x71)           - MQB only (R8 Race flag button)
+        0x71,                                                                                                                       // RS mode    (0x71)           - MQB only (R8 Race flag button)
         0x72                                                                                                                        // Race flag twist (0x72)      - R8
 };
+#endif
 
 struct frame_def {
   uint8_t id;
@@ -104,9 +110,10 @@ enum parse_states {
 const frame_def known_frames[] = {
   {0x8E, 1, 0},                                                                                                                     // Button status and errors request
   {0xBA, 1, 0},                                                                                                                     // Steering wheel heater temperature and button status request
-  {0x7D, 1, 0},                                                                                                                     // Unknown request
+  {0x7D, 1, 0},                                                                                                                     // Diagnostic response request
   {0xD, 6, 1},                                                                                                                      // Backlight data (ID + 5 bytes)
-  {0xFB, 5, 1}                                                                                                                      // Unknown data (ID + 4 bytes)
+  {0xFB, 5, 1},                                                                                                                     // Unknown data (ID + 4 bytes)
+  {0x3C, 10, 1},                                                                                                                    // UDS diagnostic data (ID + 9 bytes)
 };
 
 parse_states slave_parse_state = SYNC_WAIT;                                                                                         // Current state of the adapter (slave to J527).
@@ -115,6 +122,7 @@ LinFrame master_frame = LinFrame(), slave_frame = LinFrame();
 bool e_message_initialized = false, ba_message_initialized = false,
     d_message_initialized = false, fb_message_initialized = false,
     e_message_requested = false, ba_message_requested = false,
+    diag_response_requested = false, diag_response_received = false,
     slave_timeout = false;
 
 
@@ -129,14 +137,14 @@ void setup() {
 #endif
 #if DEBUG_MODE
   Serial.println("=======================================");
-  Serial.println("Audi MQB to C7 MLB LIN adapter started.");
-  Serial.print("Core clock speed: ");
+  Serial.println("   Audi MQB to C7 MLB LIN adapter started.");
+  Serial.print("   Core clock speed: ");
   Serial.print(F_CPU / 1000000);
   Serial.println(" MHz");
-  int rawValue = analogRead(ATEMP);
-  float voltage = rawValue * (3.3 / 1023.0);
+  int raw_value = analogRead(ATEMP);
+  float voltage = raw_value * (3.3 / 1023.0);
   float temperature = ((1.43 - voltage) / 0.0043) + 25.0;
-  Serial.print("Core temperature: ");
+  Serial.print("   Core temperature: ");
   Serial.print(temperature);
   Serial.println(" *C");
   Serial.println("=======================================");
@@ -146,7 +154,7 @@ void setup() {
   pinMode(SW_TX_PIN, OUTPUT);
   car_lin.begin(LINBUS_BAUD);
   send_lin_wakeup();
-  delay(SLAVE_BOOT_DELAY);                                                                                                          // Needed for MQB buttons to initialize.
+  delay(SLAVE_BOOT_DELAY);                                                                                                          // Needed for MQB buttons to initialize?
 
   request_buttons_status_timer
   =request_heating_status_timer
@@ -167,7 +175,7 @@ void loop() {
 #endif
 
 // MASTER - requests button status, steering heater status and provides backlight status to the steering wheel.
-// NOTE: since RX and TX are tied together sync bytes and IDs will be looped back.
+// NOTE: since RX and TX are tied together, transmitted bytes will be mirrored.
   if (sw_lin.available()) {
     slave_comm_timer = millis();
     byte n = slave_frame.num_bytes();
@@ -209,6 +217,20 @@ void loop() {
         }
       }
     }
+
+    // if (diag_response_requested) {
+    //   if (n == 0 && b == 0x55) {
+    //     // slave_frame.append_byte(0xBA);
+    //   } else {
+    //     slave_frame.append_byte(b);
+    //     n = slave_frame.num_bytes();
+    //     if (n == 10) {
+    //       handle_slave_frame();
+    //       slave_frame.reset();
+    //       diag_response_requested = false;
+    //     }
+    //   }
+    // }
   }
 
   if (((millis() - request_heating_status_timer) >= BA_MESSAGE_INTERVAL) && !ba_message_requested && !e_message_requested) {
@@ -216,7 +238,7 @@ void loop() {
     sw_lin.write((uint8_t)0x55);                                                                                                    // Send sync byte
     // delayMicroseconds(LINBUS_BIT_TIME);
     sw_lin.write((uint8_t)0xBA);                                                                                                    // Send protected ID
-    // sw_lin.flush();
+    sw_lin.flush();
 
     request_heating_status_timer = millis();
     ba_message_requested = true;
@@ -229,13 +251,12 @@ void loop() {
       sw_lin.write((uint8_t)0x55);
       // delayMicroseconds(LINBUS_BIT_TIME);
       sw_lin.write((uint8_t)0xD);
-      // sw_lin.flush();
 
       for (uint8_t i = 0; i < 5; i++) {
         sw_lin.write(backlight_status_message[i]);
       }
       backlight_status_message_timer = millis();
-      // sw_lin.flush();
+      sw_lin.flush();
     }
 
     if ((millis() - fb_message_timer) >= FB_MESSAGE_INTERVAL) {
@@ -243,26 +264,27 @@ void loop() {
       sw_lin.write((uint8_t)0x55);
       // delayMicroseconds(LINBUS_BIT_TIME);
       sw_lin.write((uint8_t)0xFB);
-      // sw_lin.flush();
 
       for (uint8_t i = 0; i < 4; i++) {
         sw_lin.write(fb_message[i]);
       }
       fb_message_timer = millis();
-      // sw_lin.flush();
+      sw_lin.flush();
     }
    
     send_lin_break();
     sw_lin.write((uint8_t)0x55);
     // delayMicroseconds(LINBUS_BIT_TIME);
     sw_lin.write((uint8_t)0x8E);
-    // sw_lin.flush();
+    sw_lin.flush();
 
     request_buttons_status_timer = millis();
     e_message_requested = true;
   }
 
 // SLAVE - reports button status, steering heater status and receive backlight data from car.
+// NOTE: since RX and TX are tied together, transmitted bytes will be mirrored.
+
   if (car_lin.available()) {
     master_comm_timer = millis();
     byte b = car_lin.read();
@@ -367,8 +389,11 @@ void loop() {
 }
 
 
-uint8_t verify_frame_checksum(LinFrame frame) {
-  uint16_t checksum = frame.get_byte(0);
+uint8_t verify_frame_checksum(LinFrame frame, uint8_t enhanced) {
+  uint16_t checksum = 0;
+  if (enhanced) {
+    checksum = frame.get_byte(0);
+  }
   for (uint8_t i = 1; i < frame.num_bytes() - 1; i++) {
     checksum += frame.get_byte(i);
     if (checksum >= 0x100) {

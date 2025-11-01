@@ -1,7 +1,13 @@
 // LIN slave frame handling functions (received by the adapter from the steering wheel controls) go here.
 
 void handle_slave_frame(void) {
-  uint8_t expected_checksum = verify_frame_checksum(slave_frame);
+  uint8_t id = slave_frame.get_byte(0);
+  uint8_t expected_checksum = 0;
+  if (id == 0x7D || id == 0x3C) {
+    expected_checksum = verify_frame_checksum(slave_frame, 0);
+  } else {
+    expected_checksum = verify_frame_checksum(slave_frame, 1);
+  }
   if (slave_frame.get_byte(slave_frame.num_bytes() - 1) != expected_checksum) {                                                     // Validate checksum
 #if DEBUG_MODE
     Serial.print("slave_frame checksum verification failed for: ");
@@ -19,7 +25,7 @@ void handle_slave_frame(void) {
 //   }
 // #endif
 
-  if (slave_frame.get_byte(0) == 0x8E) {                                                                                            // Button status
+  if (id == 0x8E) {                                                                                                                 // Button status
     buttons_status_message[0] = slave_frame.get_byte(1);                                                                            // Counter / button pressed
     buttons_status_message[7] = slave_frame.get_byte(8);                                                                            // Horn and SWC error status (paddles disconnected, left buttons disconnected etc.)
 
@@ -39,12 +45,12 @@ void handle_slave_frame(void) {
       buttons_status_message[3] = slave_frame.get_byte(4);                                                                          // scroll wheel direction or button hold duration
     }
 #else
-    buttons_status_message[1] = button_remap_array[slave_frame.get_byte(2)];
-    buttons_status_message[3] = slave_frame.get_byte(4);
+      buttons_status_message[1] = button_remap_array[slave_frame.get_byte(2)];
+      buttons_status_message[3] = slave_frame.get_byte(4);
   #if DEBUG_BUTTON_PRESS
-    if (bitRead(buttons_status_message[7], 0)) {
-      Serial.println("[ Horn ]");
-    }
+      if (bitRead(buttons_status_message[7], 0)) {
+        Serial.println("[ Horn ]");
+      }
   #endif
 #endif
 
@@ -73,7 +79,7 @@ void handle_slave_frame(void) {
 #endif
 
 #if BYPASS_SWC_ERRORS
-    buttons_status_message[7] &= 1;
+    buttons_status_message[7] &= 1;                                                                                                 // Preserve only the horn status
 #endif
 
 #if BACK_BUTTON_MEMORY
@@ -188,7 +194,7 @@ void handle_slave_frame(void) {
       e_message_initialized = true;
 #endif
   }
-  else if (slave_frame.get_byte(0) == 0xBA) {                                                                                       // Steering heater status
+  else if (id == 0xBA) {                                                                                                            // Steering heater status
     steering_heater_status_message[0] = slave_frame.get_byte(1);
 
 #if CORRECT_SW_TEMP
@@ -232,6 +238,19 @@ void handle_slave_frame(void) {
 #else
     ba_message_initialized = true;
 #endif
+  } 
+  
+  else if (id == 0x7D) {                                                                                                            // UDS response from SWC
+    diag_response_received = true;
+    diag_response_message[0] = slave_frame.get_byte(1);
+    diag_response_message[1] = slave_frame.get_byte(2);
+    diag_response_message[2] = slave_frame.get_byte(3);
+    diag_response_message[3] = slave_frame.get_byte(4);
+    diag_response_message[4] = slave_frame.get_byte(5);
+    diag_response_message[5] = slave_frame.get_byte(6);
+    diag_response_message[6] = slave_frame.get_byte(7);
+    diag_response_message[7] = slave_frame.get_byte(8);
+    diag_response_message[8] = slave_frame.get_byte(9);
   }
 }
 
@@ -255,4 +274,3 @@ void send_lin_break(void) {
   delayMicroseconds(LINBUS_BIT_TIME);                                                                                               // 1 Bit time
   sw_lin.begin(LINBUS_BAUD);                                                                                                        // Restart UART
 }
-
